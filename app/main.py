@@ -15,6 +15,7 @@ def create_app() -> Flask:
     """Application factory."""
     app = Flask(__name__)
     app.config.update(config.load_config())
+    db.init_db()
 
     @app.get("/products")
     def list_products():
@@ -31,9 +32,12 @@ def create_app() -> Flask:
             if product is None:
                 return jsonify({"error": f"unknown sku: {line['sku']}"}), 404
             cart.append((product, int(line["quantity"])))
-        order = services.build_order(order_id=1, user_id=payload["user_id"], cart=cart)
+        order = services.build_order(order_id=0, user_id=payload["user_id"], cart=cart)
         if payload.get("coupon"):
             services.apply_coupon(order, payload["coupon"])
+        order.id = db.insert_order(order)
+        for product, qty in cart:
+            db.decrement_stock(product.id, qty)
         return jsonify({
             "id": order.id,
             "subtotal_cents": order.subtotal_cents,

@@ -3,7 +3,7 @@ import sqlite3
 from contextlib import contextmanager
 from typing import Iterator, List, Optional
 
-from .models import Product
+from .models import Order, Product
 
 
 DB_PATH = "orders.db"
@@ -17,6 +17,68 @@ def connect() -> Iterator[sqlite3.Connection]:
         conn.commit()
     finally:
         conn.close()
+
+
+def init_db() -> None:
+    """Create tables if they do not already exist."""
+    with connect() as conn:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS products (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                sku         TEXT    NOT NULL UNIQUE,
+                name        TEXT    NOT NULL,
+                price_cents INTEGER NOT NULL,
+                stock       INTEGER NOT NULL DEFAULT 0,
+                category    TEXT    NOT NULL DEFAULT 'general'
+            );
+
+            CREATE TABLE IF NOT EXISTS orders (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id        INTEGER NOT NULL,
+                coupon_code    TEXT,
+                discount_cents INTEGER NOT NULL DEFAULT 0,
+                status         TEXT    NOT NULL DEFAULT 'pending',
+                created_at     TEXT    NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS order_items (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_id        INTEGER NOT NULL REFERENCES orders(id),
+                product_id      INTEGER NOT NULL REFERENCES products(id),
+                sku             TEXT    NOT NULL,
+                quantity        INTEGER NOT NULL,
+                unit_price_cents INTEGER NOT NULL
+            );
+            """
+        )
+
+
+def insert_order(order: Order) -> int:
+    """Persist an order and its line items; return the generated order ID."""
+    with connect() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO orders (user_id, coupon_code, discount_cents, status, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (
+                order.user_id,
+                order.coupon_code,
+                order.discount_cents,
+                order.status.value,
+                order.created_at.isoformat(),
+            ),
+        )
+        order_id = cursor.lastrowid
+        cursor.executemany(
+            "INSERT INTO order_items (order_id, product_id, sku, quantity, unit_price_cents) "
+            "VALUES (?, ?, ?, ?, ?)",
+            [
+                (order_id, item.product_id, item.sku, item.quantity, item.unit_price_cents)
+                for item in order.items
+            ],
+        )
+        return order_id
 
 
 def list_products(category: Optional[str] = None) -> List[Product]:
