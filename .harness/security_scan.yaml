@@ -1,6 +1,6 @@
 pipeline:
-  name: Security Scan - Trivy + Semgrep
-  identifier: security_scan_trivy_semgrep
+  name: Dependency Security Scan
+  identifier: dependency_security_scan
   projectIdentifier: REPLACE_PROJECT_ID   # REPLACE: your Harness project identifier
   orgIdentifier: REPLACE_ORG_ID           # REPLACE: your Harness org identifier
   properties:
@@ -24,39 +24,22 @@ pipeline:
             spec: {}
           execution:
             steps:
-              - parallel:
-                  - step:
-                      name: Trivy Dependency Scan
-                      identifier: trivy_scan
-                      type: Run
-                      spec:
-                        # Pinned image so the demo is reproducible next Tuesday.
-                        image: aquasec/trivy:0.55.2
-                        shell: Sh
-                        command: |-
-                          echo "=== Trivy: scanning dependencies for CVEs ==="
-                          trivy fs \
-                            --scanners vuln \
-                            --severity CRITICAL,HIGH \
-                            --exit-code 1 \
-                            --no-progress \
-                            --ignore-unfixed \
-                            .
-                  - step:
-                      name: Semgrep Static Scan
-                      identifier: semgrep_scan
-                      type: Run
-                      spec:
-                        # Pinned image so the ruleset behavior is stable across recordings.
-                        image: semgrep/semgrep:1.90.0
-                        shell: Sh
-                        command: |-
-                          echo "=== Semgrep: scanning app/ for insecure patterns ==="
-                          semgrep scan \
-                            --config p/python \
-                            --config p/security-audit \
-                            --error \
-                            --metrics=off \
-                            app
+              - step:
+                  name: Trivy Dependency Scan
+                  identifier: trivy_scan
+                  type: Run
+                  spec:
+                    # Pinned image so the demo is reproducible next Tuesday.
+                    image: aquasec/trivy:0.55.2
+                    shell: Sh
+                    command: |-
+                      echo "=== Trivy: scanning dependencies for known CVEs ==="
+                      trivy fs \
+                        --scanners vuln \
+                        --severity CRITICAL,HIGH \
+                        --exit-code 1 \
+                        --no-progress \
+                        --ignore-unfixed \
+                        .
         variables: []
   variables: []

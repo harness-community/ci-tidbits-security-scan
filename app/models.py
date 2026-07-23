@@ -1,9 +1,4 @@
-"""Domain models for the Order Service.
-
-These are plain dataclasses — no framework coupling, no vulnerabilities.
-They exist so the demo app has actual shape for the scanners to move
-through, rather than a single file of horrors.
-"""
+"""Domain models for the Order Service."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -30,14 +25,6 @@ class Product:
 
     def is_in_stock(self, qty: int = 1) -> bool:
         return self.stock >= qty
-
-
-@dataclass
-class User:
-    id: int
-    email: str
-    password_hash: str
-    is_admin: bool = False
 
 
 @dataclass

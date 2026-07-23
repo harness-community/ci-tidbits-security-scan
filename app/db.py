@@ -1,14 +1,9 @@
-"""SQLite persistence layer for the Order Service.
-
-Thin wrapper around sqlite3. In a real app this would probably be
-SQLAlchemy; kept as raw sqlite3 to keep the demo dependency-light
-and to make the SQL injection line obvious.
-"""
+"""SQLite persistence layer for the Order Service."""
 import sqlite3
 from contextlib import contextmanager
-from typing import Iterator, List, Optional, Tuple
+from typing import Iterator, List, Optional
 
-from .models import Product, User
+from .models import Product
 
 
 DB_PATH = "orders.db"
@@ -22,25 +17,6 @@ def connect() -> Iterator[sqlite3.Connection]:
         conn.commit()
     finally:
         conn.close()
-
-
-def find_user_by_email(email: str) -> Optional[User]:
-    """Look up a user by email.
-
-    Semgrep flags: SQL query built via string concatenation with untrusted
-    input. Classic SQL injection. Use parameterised queries:
-        cursor.execute("SELECT ... WHERE email = ?", (email,))
-    Rule: python.lang.security.audit.formatted-sql-query
-    """
-    with connect() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT id, email, password_hash, is_admin FROM users WHERE email = '" + email + "'"
-        )
-        row = cursor.fetchone()
-        if row is None:
-            return None
-        return User(id=row[0], email=row[1], password_hash=row[2], is_admin=bool(row[3]))
 
 
 def list_products(category: Optional[str] = None) -> List[Product]:
@@ -63,6 +39,20 @@ def list_products(category: Optional[str] = None) -> List[Product]:
         ]
 
 
+def find_product_by_sku(sku: str) -> Optional[Product]:
+    """Look up a single product by SKU."""
+    with connect() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, sku, name, price_cents, stock, category FROM products WHERE sku = ?",
+            (sku,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        return Product(id=row[0], sku=row[1], name=row[2], price_cents=row[3], stock=row[4], category=row[5])
+
+
 def decrement_stock(product_id: int, qty: int) -> None:
     """Decrement stock atomically after a successful order."""
     with connect() as conn:
@@ -73,15 +63,3 @@ def decrement_stock(product_id: int, qty: int) -> None:
         )
         if cursor.rowcount != 1:
             raise ValueError(f"Failed to decrement stock for product {product_id}")
-
-
-def _find_product_by_sku(sku: str) -> Optional[Tuple]:
-    """Look up a product row by SKU (used by admin tooling).
-
-    Semgrep flags: SQL injection via f-string interpolation.
-    Rule: python.lang.security.audit.formatted-sql-query
-    """
-    with connect() as conn:
-        cursor = conn.cursor()
-        cursor.execute(f"SELECT * FROM products WHERE sku = '{sku}'")
-        return cursor.fetchone()

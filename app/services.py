@@ -1,10 +1,4 @@
-"""Order and pricing business logic.
-
-This module holds the "how does an order work" logic — validation, pricing,
-discount application, state transitions. Kept intentionally clean so scanners
-have a mix of vulnerable and non-vulnerable code to move through, which is
-what a real codebase looks like.
-"""
+"""Order and pricing business logic."""
 from __future__ import annotations
 
 from typing import Dict, Iterable, Tuple
@@ -12,7 +6,6 @@ from typing import Dict, Iterable, Tuple
 from .models import Order, OrderItem, OrderStatus, Product
 
 
-# Coupon table — in a real app this would live in the DB.
 COUPONS: Dict[str, Tuple[str, int]] = {
     "WELCOME10": ("percent", 10),   # 10% off
     "SAVE5":     ("flat",    500),  # $5 off
@@ -32,10 +25,7 @@ def build_order(
     user_id: int,
     cart: Iterable[Tuple[Product, int]],
 ) -> Order:
-    """Build an Order from a cart of (product, quantity) tuples.
-
-    Raises ValueError if any product is out of stock at the requested qty.
-    """
+    """Build an Order from a cart of (product, quantity) tuples."""
     items = []
     for product, qty in cart:
         if not product.is_in_stock(qty):

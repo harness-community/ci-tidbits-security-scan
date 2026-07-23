@@ -3,27 +3,22 @@
 > **Bite-sized how-to** | ~10 min setup
 ---
 
-> ## ⚠️ This repo is intentionally vulnerable
+> ## ⚠️ This repo pins vulnerable dependencies on purpose
 >
-> The Python app under `app/` and the pinned versions in `requirements.txt` are **deliberately insecure** so the scanners have something to find. It contains, on purpose:
->
-> - Known-CVE dependency versions (`flask==1.0`, `pyyaml==5.3.1`, `requests==2.19.0`, …)
-> - SQL injection, `yaml.load` without SafeLoader, `subprocess(shell=True)`, `os.system` with user input, MD5 password hashing, a hardcoded secret, disabled TLS verification, and `pickle.loads` on untrusted bytes.
->
-> **Do not** use this code, or any part of it, as the basis for a real project. **Do not** deploy it to any network you do not fully control. **Do not** copy `requirements.txt` into another repo. It exists for one purpose: to demonstrate that Harness CI catches these things before they merge.
+> `requirements.txt` in this repo is deliberately pinned to old library versions with known CVEs (`flask==1.0`, `pyyaml==5.3.1`, `requests==2.19.0`, `urllib3==1.24.1`, `jinja2==2.10`) so the CI scan has something to find. The Python code under `app/` is clean — no intentional insecure patterns. **Do not** copy `requirements.txt` into a real project. **Do not** deploy this app to any network you do not fully control.
 
 ---
 
-## What is a lightweight security scan?
+## What is a lightweight dependency scan?
 
-A lightweight security scan is a **shift-left gate**: run a small, fast pair of scanners inside your CI pipeline so vulnerabilities fail the build before code merges, not after it ships. This tidbit uses two complementary scanners in parallel:
+A dependency scan is a **shift-left gate**: run a Software Composition Analysis (SCA) scanner inside your CI pipeline so vulnerable dependencies fail the build before code merges, not after it ships. This tidbit uses **Trivy** as a plain CI Run step — one image, one command, one gate:
 
-- **Trivy** — a **Software Composition Analysis (SCA)** scanner. Reads dependency manifests (`requirements.txt`, `package.json`, `go.sum`, etc.) and flags known CVEs against installed versions. Catches **what you imported**.
-- **Semgrep** — a **Static Application Security Testing (SAST)** scanner. Pattern-matches your source code against curated rulesets and flags insecure code shapes (`yaml.load`, `subprocess(..., shell=True)`, hardcoded secrets, SQL string concatenation, etc.). Catches **how you wrote it**.
+- **Trivy** reads dependency manifests (`requirements.txt`, `package.json`, `go.sum`, and dozens more), cross-references them against a vulnerability database, and reports CVEs against the installed versions.
+- The Run step **exits non-zero** on any CRITICAL or HIGH finding, which fails the Harness stage, which fails the pipeline.
 
-Running them **in parallel** as two Run steps keeps total scan time close to the slower of the two — a one-line YAML change (`- parallel:`) that you can reuse for any pair of independent CI gates (lint + test, scan + license check, and so on).
+**The result:** a red build the moment a pinned dependency has a known vulnerability with a fix available. Your code can be pristine and your deps can still sink you — that is what SCA catches.
 
-**The result:** a red build the moment a vulnerable dependency is pinned or an insecure pattern is written, with both classes of findings surfaced side-by-side in the execution graph.
+> **Why just Trivy?** This is the smallest possible version of a shift-left security gate — one scanner, one step, ~15 lines of pipeline YAML. For SAST, secret scanning, IaC scanning, or multi-scanner setups, see the "What's next?" section.
 
 ---
 
@@ -33,37 +28,32 @@ Before you start, make sure you have:
 
 - A Harness account with a **Project** (note its org + project identifiers).
 - A **Git connector** (GitHub / GitLab / Bitbucket) pointed at your fork of this repo.
-- Harness Cloud build credits (default on Harness-hosted runners). **No STO license, no delegate, no scanner licenses required** — Trivy and Semgrep both run as public Docker images in a Run step.
+- Harness Cloud build credits (default on Harness-hosted runners). **No STO license, no delegate, no Trivy license required** — Trivy runs as a public Docker image inside a plain CI Run step.
 
-> **Note:** The scanner images (`aquasec/trivy`, `semgrep/semgrep`) are pulled anonymously from Docker Hub. If you hit pull rate limits, add a Docker Hub connector and reference it via `connectorRef` on each Run step.
+> **Note:** The Trivy image (`aquasec/trivy`) is pulled anonymously from Docker Hub. If you hit pull rate limits, add a Docker Hub connector and reference it via `connectorRef` on the Run step.
 
 ---
 
 ## Step 1 — Fork this repo and review the sample app
 
-The repo ships with an intentionally vulnerable Python **Order Service** under `app/` and a pinned `requirements.txt` at the root, so the scanners have something to find on the first run.
+The repo ships with a small Python **Order Service** under `app/` and a pinned `requirements.txt` at the root. The app is deliberately clean — the entire vulnerable surface lives in `requirements.txt`.
 
 ```
 .
 ├── .harness/
-│   └── security_scan.yaml    ← the pipeline
+│   └── security_scan.yaml    ← the pipeline (one CI stage, one Run step)
 ├── app/
 │   ├── __init__.py
-│   ├── main.py               ← Flask app factory + routes  (debug=True)
-│   ├── models.py             ← Product / User / Order dataclasses (clean)
-│   ├── services.py           ← Pricing, coupons, order lifecycle (clean)
-│   ├── config.py             ← YAML config loader           (yaml.load)
-│   ├── db.py                 ← SQLite persistence           (SQL injection)
-│   ├── auth.py               ← Password hashing + tokens    (MD5, hardcoded secret)
-│   ├── backup.py             ← Admin backup routines        (shell=True, os.system)
-│   └── external.py           ← Exchange rates + payments    (verify=False, pickle.loads)
-├── requirements.txt          ← pinned vulnerable deps
+│   ├── main.py               ← Flask app factory + routes
+│   ├── models.py             ← Product / Order / OrderItem dataclasses
+│   ├── services.py           ← pricing, coupons, order lifecycle
+│   ├── config.py             ← YAML config loader
+│   └── db.py                 ← SQLite persistence, parameterised queries
+├── requirements.txt          ← pinned vulnerable deps ← the scan target
 └── README.md
 ```
 
-Fork the repo into your own GitHub org so your Harness Git connector can read it. No local Python setup is needed — the scanners run inside CI containers.
-
-> **Tip:** Not every file is vulnerable. `models.py` and `services.py` are deliberately clean, so Semgrep has to walk past real business logic to find the interesting stuff — a more honest picture of what SAST looks like in a real codebase.
+Fork the repo into your own GitHub org so your Harness Git connector can read it. No local Python setup is needed — Trivy runs inside a CI container.
 
 ---
 
@@ -83,55 +73,31 @@ In your Harness project:
 1. Click **Run**. Harness prompts for the codebase runtime inputs — pick your **Git connector**, enter the **repo name** (e.g. `your-user/ci-tidbits-security-scan`), and pick a **branch** (e.g. `main`).
 2. Click **Run Pipeline**.
 
-In the execution graph, watch the two scanners run **side-by-side** under a single parallel block. Both are expected to fail.
+The **Trivy Dependency Scan** step runs, downloads the vulnerability DB, scans `requirements.txt`, and exits with `1` because CRITICAL/HIGH findings were detected.
 
 ### Expected Trivy findings
+
+Approximate output (exact CVE list depends on when the DB was last refreshed):
 
 ```
 requirements.txt (pip)
 ======================
-Total: 8 (CRITICAL: 2, HIGH: 6)
+Total: 10 (CRITICAL: 1, HIGH: 8, MEDIUM: 1)
 
-┌──────────┬────────────────┬──────────┬─────────┬───────────────┐
-│ Library  │ Vulnerability  │ Severity │ Version │ Fixed Version │
-├──────────┼────────────────┼──────────┼─────────┼───────────────┤
-│ pyyaml   │ CVE-2020-14343 │ CRITICAL │ 5.3.1   │ 5.4           │
-│ jinja2   │ CVE-2019-10906 │ HIGH     │ 2.10    │ 2.10.1        │
-│ requests │ CVE-2018-18074 │ HIGH     │ 2.19.0  │ 2.20.0        │
-│ urllib3  │ CVE-2019-11324 │ HIGH     │ 1.24.1  │ 1.24.2        │
-│ ...      │                │          │         │               │
-└──────────┴────────────────┴──────────┴─────────┴───────────────┘
+┌──────────┬────────────────┬──────────┬─────────┬───────────────────────────────┐
+│ Library  │ Vulnerability  │ Severity │ Version │ Title                         │
+├──────────┼────────────────┼──────────┼─────────┼───────────────────────────────┤
+│ pyyaml   │ CVE-2020-14343 │ CRITICAL │ 5.3.1   │ arbitrary code execution      │
+│ jinja2   │ CVE-2019-10906 │ HIGH     │ 2.10    │ sandbox escape                │
+│ jinja2   │ CVE-2020-28493 │ HIGH     │ 2.10    │ ReDoS in urlize filter        │
+│ requests │ CVE-2018-18074 │ HIGH     │ 2.19.0  │ Authorization header leak     │
+│ urllib3  │ CVE-2019-11324 │ HIGH     │ 1.24.1  │ CRLF injection                │
+│ urllib3  │ CVE-2019-11236 │ HIGH     │ 1.24.1  │ CRLF injection in URL         │
+│ ...      │                │          │         │                               │
+└──────────┴────────────────┴──────────┴─────────┴───────────────────────────────┘
 ```
 
-Exit code `1` → step fails.
-
-### Expected Semgrep findings
-
-```
-app/main.py
-   67  debug-enabled                     Flask app.run(debug=True)
-
-app/config.py
-   30  dangerous-yaml-load               yaml.load(f) without SafeLoader
-
-app/db.py
-   38  formatted-sql-query               string concat in cursor.execute
-   86  formatted-sql-query               f-string interpolation in SELECT
-
-app/auth.py
-   18  detected-generic-secret           hardcoded SESSION_SECRET
-   31  insecure-hash-algorithms-md5      hashlib.md5 used for password hashing
-
-app/backup.py
-   21  dangerous-subprocess-use          subprocess.call with shell=True
-   33  dangerous-system-call             os.system with user-controlled input
-
-app/external.py
-   24  disabled-cert-validation          requests.get(..., verify=False)
-   37  avoid-pickle                      pickle.loads on untrusted data
-```
-
-Exit code `1` → step fails.
+Exit code `1` → step fails → pipeline is red.
 
 **Red is the correct outcome for the first run.** It proves the gate works.
 
@@ -139,9 +105,7 @@ Exit code `1` → step fails.
 
 ## Step 4 — Fix, re-run, watch it go green
 
-Turn the findings green a file at a time so the demo tells a clean story:
-
-**Fix the dependencies** (Trivy):
+Bump the pins to current versions:
 
 ```txt
 # requirements.txt — after
@@ -152,22 +116,7 @@ urllib3>=2.2.2
 jinja2>=3.1.4
 ```
 
-**Fix the code** (Semgrep) — one row per finding, with line numbers:
-
-| File           | Line(s) | Change                                                                        |
-| -------------- | ------- | ----------------------------------------------------------------------------- |
-| `main.py`      | 67      | `debug=True` → `debug=False`                                                  |
-| `config.py`    | 30      | `yaml.load(f)` → `yaml.safe_load(f)`                                          |
-| `db.py`        | 38      | Concatenated SQL → parameterised (`... WHERE email = ?`, `(email,)`)          |
-| `db.py`        | 86      | f-string SQL → parameterised (`... WHERE sku = ?`, `(sku,)`)                  |
-| `auth.py`      | 18      | Move `SESSION_SECRET` to `os.environ["SESSION_SECRET"]`                       |
-| `auth.py`      | 31      | `hashlib.md5(...)` → `bcrypt.hashpw(...)` (or argon2)                         |
-| `backup.py`    | 21      | `subprocess.call(cmd, shell=True)` → `subprocess.run([...], check=True)`      |
-| `backup.py`    | 33      | `os.system(...)` → `subprocess.run([...], check=True)`                        |
-| `external.py`  | 24      | Drop `verify=False`                                                           |
-| `external.py`  | 37      | `pickle.loads(blob)` → `json.loads(blob.decode())`                            |
-
-Commit, push, re-run the pipeline. Both scan steps go green in parallel. That's the whole story of the tidbit: a two-scanner gate you can drop into any CI pipeline in about twenty lines of YAML.
+Commit, push, re-run the pipeline. Trivy finds nothing above HIGH, exits `0`, the step goes green, the pipeline goes green. That's the whole story of the tidbit: a one-step CI gate you can drop into any pipeline in about fifteen lines of YAML.
 
 ---
 
@@ -187,29 +136,31 @@ stages:
           spec: {}
         execution:
           steps:
-            - parallel:
-                - step:
-                    name: Trivy Dependency Scan
-                    type: Run
-                    spec:
-                      image: aquasec/trivy:0.55.2
-                      command: |-
-                        trivy fs --scanners vuln \
-                          --severity CRITICAL,HIGH \
-                          --exit-code 1 --ignore-unfixed .
-                - step:
-                    name: Semgrep Static Scan
-                    type: Run
-                    spec:
-                      image: semgrep/semgrep:1.90.0
-                      command: |-
-                        semgrep scan \
-                          --config p/python \
-                          --config p/security-audit \
-                          --error app
+            - step:
+                name: Trivy Dependency Scan
+                type: Run
+                spec:
+                  image: aquasec/trivy:0.55.2
+                  command: |-
+                    trivy fs \
+                      --scanners vuln \
+                      --severity CRITICAL,HIGH \
+                      --exit-code 1 \
+                      --ignore-unfixed .
 ```
 
-> **Tip:** Pin your scanner image tags (`aquasec/trivy:0.55.2`, `semgrep/semgrep:1.90.0`). Rules and defaults shift between minor versions, and a demo that worked yesterday should still work tomorrow.
+> **Tip:** Pin the Trivy image tag (`aquasec/trivy:0.55.2`). Trivy's defaults, output format, and rule set shift between minor versions — pinning means the demo that worked yesterday still works tomorrow.
+
+### What the flags do
+
+| Flag                          | Effect                                                             |
+| ----------------------------- | ------------------------------------------------------------------ |
+| `fs`                          | Scan the filesystem (as opposed to `image`, `repo`, `sbom`, etc.)  |
+| `--scanners vuln`             | Only run the vulnerability scanner (skip secret and misconfig)     |
+| `--severity CRITICAL,HIGH`    | Only report CRITICAL and HIGH findings                             |
+| `--exit-code 1`               | Exit non-zero when findings are present → fails the CI step        |
+| `--ignore-unfixed`            | Skip CVEs with no fix available yet (reduces noise)                |
+| `--no-progress`               | Cleaner logs on non-interactive terminals                          |
 
 ---
 
@@ -218,95 +169,64 @@ stages:
 **Trivy step passes with zero findings.**
 The vuln DB failed to download (no network egress from the build container). Check the step log for `Vulnerability DB downloaded`; if missing, add `--debug` to the trivy command. Alternately, someone updated `requirements.txt` — check the pins.
 
-**Semgrep step passes with zero findings.**
-Someone edited `app/`, or the ruleset changed. Confirm `--config p/python --config p/security-audit` are both present and the image tag is pinned.
+**`docker pull` rate-limit on the scanner image.**
+Public Docker Hub anonymous pulls are throttled. Add a Docker registry connector in Harness and set `connectorRef:` on the Run step.
 
-**`docker pull` rate-limit on the scanner images.**
-Public Docker Hub anonymous pulls are throttled. Add a Docker registry connector in Harness and set `connectorRef:` on each Run step to it.
+**The step passes but I know my deps are vulnerable.**
+`--ignore-unfixed` skips CVEs without a released fix. Drop that flag to see them all (at the cost of some noise). Also check `--severity` — CVEs below HIGH won't be reported.
 
-**Steps ran sequentially, not in parallel.**
-The `- parallel:` list item must sit directly under `steps:`, with the two `- step:` entries nested under it. Indentation matters — YAML is unforgiving here.
-
-**The build failed but I can't tell which scanner found what.**
-Each Run step's log is independent — click into each step separately in the execution view. The `echo "=== ... ==="` header at the top of each command block makes the log easy to scan.
+**I want the scan to run but not fail the build.**
+Remove `--exit-code 1`. The scanner will still print its findings; the step will always exit `0`. Useful for a "shadow mode" rollout before you turn the gate on.
 
 ---
 
 ## What's next?
 
-- **Fail modes as a variable.** Add a `fail_on_findings` pipeline variable (String, `<+input>.default("true").allowedValues("true","false")`) and gate the `--exit-code 1` / `--error` flags on it. Lets you run the same pipeline in "report only" mode against legacy code.
-- **Add a third scanner.** Gitleaks for secrets, Checkov for IaC, Grype as a second SCA opinion — same `- parallel:` pattern, one more `- step:`.
-- **Graduate to Harness STO.** When you want findings deduplicated, tracked as issues, gated by OPA policies, and rolled up across pipelines, this pattern is the starting point — the same scanner integrations exist as first-class STO steps.
+- **Add a static (SAST) scan alongside.** Add a second Run step with `semgrep/semgrep:1.90.0` and `semgrep scan --config p/python --error app`. Wrap both under `- parallel:` to keep total scan time close to the slower of the two.
+- **Fail modes as a variable.** Add a `fail_on_findings` pipeline variable (`<+input>.default("true").allowedValues("true","false")`) and gate `--exit-code 1` on it. Same pipeline runs in enforce or report-only mode.
+- **Graduate to Harness STO.** When you want findings deduplicated across runs, tracked as issues, gated by OPA policies, and rolled up in a security dashboard, this Run-step pattern is the starting point — STO has a first-class **Aqua Trivy** step (Orchestration mode, Filesystem scan config) that maps cleanly to what you built here.
 
 ---
 
 ## Resources
 
 - [Run step settings](https://developer.harness.io/docs/continuous-integration/use-ci/run-step-settings/)
-- [Run steps in parallel](https://developer.harness.io/docs/continuous-integration/use-ci/optimize-and-more/run-steps-in-parallel/)
-- [Trivy CLI reference](https://aquasecurity.github.io/trivy/latest/docs/references/configuration/cli/trivy_fs/)
-- [Semgrep CLI reference](https://semgrep.dev/docs/cli-reference)
+- [Trivy `fs` CLI reference](https://aquasecurity.github.io/trivy/latest/docs/references/configuration/cli/trivy_fs/)
+- [Trivy severity filtering](https://aquasecurity.github.io/trivy/latest/docs/configuration/filtering/)
 - [Harness STO overview](https://developer.harness.io/docs/security-testing-orchestration/sto-overview/)
 
 ---
 
-# Order Service — Security Scan Demo App
+# Order Service — Dependency Scan Demo App
 
-A small Python Flask **Order Service** with intentional vulnerabilities across the codebase, designed to demonstrate **lightweight security scanning in Harness CI**. Every insecure pattern here is on purpose.
-
----
+A small Python Flask **Order Service** used as a target for the CI dependency scan. The code is clean; the vulnerabilities live entirely in `requirements.txt`.
 
 ## What the app does
 
 A stripped-down e-commerce backend:
 
 - Browse products (`GET /products`, optionally filtered by category).
-- Log in and receive a signed session token (`POST /auth/login`).
 - Place an order with an optional coupon code (`POST /orders`).
-- Trigger an admin backup of the DB and invoice PDFs (`POST /admin/backup`).
 
-The domain logic is real — `services.py` computes subtotals, applies percent / flat coupons, walks the order state machine (`pending → paid → shipped`), and calculates tax by country. Only the security-sensitive plumbing (config loading, DB access, auth, backups, external calls) is deliberately broken.
-
----
+The domain logic in `services.py` is real — it computes subtotals, applies percent / flat coupons, walks the order state machine (`pending → paid → shipped`), and calculates tax by country.
 
 ## Project structure
 
 ```
 app/
 ├── __init__.py       — package marker
-├── main.py           — Flask app factory + routes            [debug=True]
-├── models.py         — Product / User / Order / OrderItem    (clean)
-├── services.py       — build_order, apply_coupon, tax, state (clean)
-├── config.py         — YAML config loader                    [yaml.load]
-├── db.py             — sqlite3 wrappers                      [SQL injection ×2]
-├── auth.py           — password hashing + session tokens     [MD5, hardcoded secret]
-├── backup.py         — snapshot_db, sync_invoices            [shell=True, os.system]
-└── external.py       — currency + payment gateway            [verify=False, pickle.loads]
+├── main.py           — Flask app factory + routes
+├── models.py         — Product / Order / OrderItem dataclasses
+├── services.py       — build_order, apply_coupon, tax, state transitions
+├── config.py         — YAML config loader (uses safe_load)
+└── db.py             — sqlite3 wrappers (parameterised queries)
 
-requirements.txt      — pinned vulnerable deps
+requirements.txt      — pinned vulnerable deps ← the scan target
 ```
-
----
-
-## What each scanner finds
-
-| Layer                          | Trivy (SCA)                          | Semgrep (SAST)                                          |
-| ------------------------------ | ------------------------------------ | ------------------------------------------------------- |
-| `requirements.txt`             | pyyaml, flask, requests, urllib3, jinja2 CVEs (2 CRIT / 6 HIGH) | — |
-| `app/main.py`                  | —                                    | Flask `debug=True`                                      |
-| `app/config.py`                | —                                    | `yaml.load` without SafeLoader                          |
-| `app/db.py`                    | —                                    | SQL injection via string concat + f-string              |
-| `app/auth.py`                  | —                                    | Hardcoded secret, MD5 password hashing                  |
-| `app/backup.py`                | —                                    | `subprocess(shell=True)`, `os.system` with user input   |
-| `app/external.py`              | —                                    | `requests` with `verify=False`, `pickle.loads` on bytes |
-
-Ten Semgrep findings and eight-ish Trivy findings out of the box — enough to make the "red build" moment obvious on camera, few enough that you can talk through them in ninety seconds.
-
----
 
 ## Running the app locally (optional)
 
-You don't need to run the app for the scans to work — the scanners are static, they never execute code. But if you want to poke at it:
+You don't need to run the app for the scan to work — Trivy is static, it never executes code. But if you want to poke at it:
 
 ```bash
 pip install -r requirements.txt
@@ -315,14 +235,10 @@ python -m app.main
 curl "http://localhost:8080/products?category=books"
 ```
 
-> **Warning:** Do not expose this to any network you don't fully control. It is deliberately exploitable.
-
----
-
 ## Tech Stack
 
 - **Python 3.11+**
 - **Flask** (pinned to a vulnerable 1.0 for the demo)
 - **PyYAML, requests, urllib3, jinja2** (all pinned to vulnerable versions)
 - **SQLite** (via the standard library — no ORM)
-- **Harness CI** with Trivy + Semgrep as parallel Run steps
+- **Harness CI** with Trivy as a single Run step
