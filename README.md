@@ -1,6 +1,7 @@
 # CI | Tidbits | Security Scan
 
 > **Bite-sized how-to** | ~10 min setup
+
 ---
 
 > ## ⚠️ This repo pins vulnerable dependencies on purpose
@@ -28,7 +29,7 @@ Before you start, make sure you have:
 
 - A Harness account with a **Project** (note its org + project identifiers).
 - A **Git connector** (GitHub / GitLab / Bitbucket) pointed at your fork of this repo.
-- Harness Cloud build credits (default on Harness-hosted runners). **No STO license, no delegate, no Trivy license required** — Trivy runs as a public Docker image inside a plain CI Run step.
+- Harness Cloud build credits (default on Harness-hosted runners). Trivy runs as a public Docker image inside a plain CI Run step — no additional licenses required.
 
 > **Note:** The Trivy image (`aquasec/trivy`) is pulled anonymously from Docker Hub. If you hit pull rate limits, add a Docker Hub connector and reference it via `connectorRef` on the Run step.
 
@@ -61,7 +62,7 @@ Fork the repo into your own GitHub org so your Harness Git connector can read it
 
 In your Harness project:
 
-1. Go to **Pipelines → Create a Pipeline → Import From Git**, *or* choose **Create** and switch the editor to **YAML**.
+1. Go to **Pipelines → Create a Pipeline → Import From Git**, _or_ choose **Create** and switch the editor to **YAML**.
 2. Paste the contents of `.harness/security_scan.yaml`.
 3. Edit the `# REPLACE:` lines: set `projectIdentifier` and `orgIdentifier` to yours.
 4. Save.
@@ -153,14 +154,14 @@ stages:
 
 ### What the flags do
 
-| Flag                          | Effect                                                             |
-| ----------------------------- | ------------------------------------------------------------------ |
-| `fs`                          | Scan the filesystem (as opposed to `image`, `repo`, `sbom`, etc.)  |
-| `--scanners vuln`             | Only run the vulnerability scanner (skip secret and misconfig)     |
-| `--severity CRITICAL,HIGH`    | Only report CRITICAL and HIGH findings                             |
-| `--exit-code 1`               | Exit non-zero when findings are present → fails the CI step        |
-| `--ignore-unfixed`            | Skip CVEs with no fix available yet (reduces noise)                |
-| `--no-progress`               | Cleaner logs on non-interactive terminals                          |
+| Flag                       | Effect                                                            |
+| -------------------------- | ----------------------------------------------------------------- |
+| `fs`                       | Scan the filesystem (as opposed to `image`, `repo`, `sbom`, etc.) |
+| `--scanners vuln`          | Only run the vulnerability scanner (skip secret and misconfig)    |
+| `--severity CRITICAL,HIGH` | Only report CRITICAL and HIGH findings                            |
+| `--exit-code 1`            | Exit non-zero when findings are present → fails the CI step       |
+| `--ignore-unfixed`         | Skip CVEs with no fix available yet (reduces noise)               |
+| `--no-progress`            | Cleaner logs on non-interactive terminals                         |
 
 ---
 
@@ -184,7 +185,6 @@ Remove `--exit-code 1`. The scanner will still print its findings; the step will
 
 - **Add a static (SAST) scan alongside.** Add a second Run step with `semgrep/semgrep:1.90.0` and `semgrep scan --config p/python --error app`. Wrap both under `- parallel:` to keep total scan time close to the slower of the two.
 - **Fail modes as a variable.** Add a `fail_on_findings` pipeline variable (`<+input>.default("true").allowedValues("true","false")`) and gate `--exit-code 1` on it. Same pipeline runs in enforce or report-only mode.
-- **Graduate to Harness STO.** When you want findings deduplicated across runs, tracked as issues, gated by OPA policies, and rolled up in a security dashboard, this Run-step pattern is the starting point — STO has a first-class **Aqua Trivy** step (Orchestration mode, Filesystem scan config) that maps cleanly to what you built here.
 
 ---
 
@@ -193,7 +193,6 @@ Remove `--exit-code 1`. The scanner will still print its findings; the step will
 - [Run step settings](https://developer.harness.io/docs/continuous-integration/use-ci/run-step-settings/)
 - [Trivy `fs` CLI reference](https://aquasecurity.github.io/trivy/latest/docs/references/configuration/cli/trivy_fs/)
 - [Trivy severity filtering](https://aquasecurity.github.io/trivy/latest/docs/configuration/filtering/)
-- [Harness STO overview](https://developer.harness.io/docs/security-testing-orchestration/sto-overview/)
 
 ---
 
