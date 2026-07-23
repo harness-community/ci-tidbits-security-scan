@@ -33,7 +33,7 @@ pipeline:
                   type: Run
                   spec:
                     # Pinned image so the demo is reproducible next Tuesday.
-                    image: aquasec/trivy:0.55.2
+                    image: aquasec/trivy:0.72.0
                     shell: Sh
                     command: |-
                       echo "=== Trivy: scanning dependencies for known CVEs ==="
