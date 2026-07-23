@@ -1,6 +1,5 @@
-# Bumped to current versions — no known CRITICAL/HIGH CVEs with fixes available.
-flask>=3.0.0
-pyyaml>=6.0.1
-requests>=2.32.0
-urllib3>=2.2.2
-jinja2>=3.1.4
+flask==3.0.3
+pyyaml==6.0.2
+requests==2.32.3
+urllib3==2.5.0
+jinja2==3.1.6
