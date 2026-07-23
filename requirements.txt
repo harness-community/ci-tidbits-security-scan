@@ -2,6 +2,6 @@
 # In a real project, keep these current.
 flask==1.0        # pulls in old Werkzeug + Jinja2 with multiple CVEs
 pyyaml==5.3.1     # CVE-2020-14343 (CRITICAL) - arbitrary code execution
-requests==2.19.0  # CVE-2018-18074 (HIGH)     - Authorization header leak
+requests==2.33.0  # CVE-2018-18074 (HIGH)     - Authorization header leak
 urllib3==1.24.1   # CVE-2019-11324, CVE-2019-11236 (HIGH)
 jinja2==2.10      # CVE-2019-10906 (HIGH)     - sandbox escape
